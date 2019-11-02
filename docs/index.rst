@@ -20,8 +20,10 @@ Graphite Documentation
    functions
    dashboard
    whisper
+   ceres
    storage-backends
    events
+   tags
    terminology
    tools
    development

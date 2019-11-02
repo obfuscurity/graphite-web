@@ -14,11 +14,13 @@ Here are some organizations that use Graphite:
 * `Google <http://google-opensource.blogspot.com/2010/09/get-ready-to-rocksteady.html>`_ (opensource Rocksteady project)
 * `GOV.UK <https://www.gov.uk>`_
 * `ImmobilienScout24 <http://www.immobilienscout24.de/>`_
+* `InMobi <http://inmobi.com/>`_
 * `Instagram <http://instagram.com/>`_
 * `ITV <http://www.itv.com/>`_
 * `Maaii <http://www.maaii.com>`_
 * `Mackerel <https://mackerel.io>`_
 * `Media Temple <http://mediatemple.net/>`_
+* `Oracle <http://www.oracle.com/>`_
 * `Orbitz <http://www.orbitz.com/>`_
 * `Outbrain <http://outbrain.com/>`_ (see https://github.com/outbrain/gruffalo)
 * `Pandora <http://www.pandora.com/>`_

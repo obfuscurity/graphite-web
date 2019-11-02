@@ -37,15 +37,18 @@
 #   deactivate
 #
 
-Django>=1.9,<1.9.99
-python-memcached==1.47
-txAMQP==0.4
-simplejson==2.1.6
-django-tagging==0.4.3
+Django>=1.8,<2.3
+python-memcached==1.58
+txAMQP==0.8
+django-tagging==0.4.6
 gunicorn
 pytz
-pyparsing==1.5.7
+pyparsing
 cairocffi
 git+git://github.com/graphite-project/whisper.git#egg=whisper
-git+git://github.com/graphite-project/ceres.git#egg=ceres
+# Ceres is optional
+# git+git://github.com/graphite-project/ceres.git#egg=ceres
 whitenoise
+scandir
+urllib3
+six

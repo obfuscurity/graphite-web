@@ -3,15 +3,20 @@
 from __future__ import with_statement
 
 import os
-import ConfigParser
+try:
+    from ConfigParser import ConfigParser, DuplicateSectionError  # Python 2
+except ImportError:
+    from configparser import ConfigParser, DuplicateSectionError  # Python 3
 
 from glob import glob
 from collections import defaultdict
 
+# io.StringIO is strictly unicode only. Python 2 StringIO.StringIO accepts
+# bytes, so we'll conveniently ignore decoding and reencoding the file there.
 try:
-    from io import BytesIO
+    from StringIO import StringIO  # Python 2
 except ImportError:
-    from StringIO import StringIO as BytesIO
+    from io import StringIO  # Python 3
 
 # Graphite historically has an install prefix set in setup.cfg. Being in a
 # configuration file, it's not easy to override it or unset it (for installing
@@ -24,22 +29,22 @@ except ImportError:
 # ``setup.cfg``.
 with open('setup.cfg', 'r') as f:
     orig_setup_cfg = f.read()
-cf = ConfigParser.ConfigParser()
-cf.readfp(BytesIO(orig_setup_cfg), 'setup.cfg')
+cf = ConfigParser()
+cf.readfp(StringIO(orig_setup_cfg), 'setup.cfg')
 
 if os.environ.get('GRAPHITE_NO_PREFIX') or os.environ.get('READTHEDOCS'):
     cf.remove_section('install')
 else:
     try:
         cf.add_section('install')
-    except ConfigParser.DuplicateSectionError:
+    except DuplicateSectionError:
         pass
     if not cf.has_option('install', 'prefix'):
         cf.set('install', 'prefix', '/opt/graphite')
     if not cf.has_option('install', 'install-lib'):
         cf.set('install', 'install-lib', '%(prefix)s/webapp')
 
-with open('setup.cfg', 'wb') as f:
+with open('setup.cfg', 'w') as f:
     cf.write(f)
 
 if os.environ.get('USE_SETUPTOOLS'):
@@ -53,7 +58,7 @@ else:
 
 storage_dirs = []
 
-for subdir in ('whisper', 'ceres', 'rrd', 'log', 'log/webapp'):
+for subdir in ('whisper/dummy.txt', 'ceres/dummy.txt', 'rrd/dummy.txt', 'log/dummy.txt', 'log/webapp/dummy.txt'):
   storage_dirs.append( ('storage/%s' % subdir, []) )
 
 webapp_content = defaultdict(list)
@@ -66,35 +71,51 @@ for root, dirs, files in os.walk('webapp/content'):
 conf_files = [ ('conf', glob('conf/*.example')) ]
 examples = [ ('examples', glob('examples/example-*')) ]
 
+def read(fname):
+    with open(os.path.join(os.path.dirname(__file__), fname)) as f:
+        return f.read()
+
 try:
     setup(
       name='graphite-web',
-      version='0.10.0-rc1',
+      version='1.2.0',
       url='http://graphiteapp.org/',
       author='Chris Davis',
       author_email='chrismd@gmail.com',
       license='Apache Software License 2.0',
       description='Enterprise scalable realtime graphing',
+      long_description=read('README.md'),
+      long_description_content_type='text/markdown',
       package_dir={'' : 'webapp'},
       packages=[
         'graphite',
         'graphite.account',
+        'graphite.account.migrations',
         'graphite.browser',
         'graphite.composer',
         'graphite.dashboard',
+        'graphite.dashboard.migrations',
         'graphite.events',
+        'graphite.events.migrations',
         'graphite.finders',
+        'graphite.functions',
+        'graphite.functions.custom',
         'graphite.metrics',
+        'graphite.readers',
         'graphite.render',
+        'graphite.tags',
+        'graphite.tags.migrations',
         'graphite.url_shortener',
+        'graphite.url_shortener.migrations',
         'graphite.version',
         'graphite.whitelist',
+        'graphite.worker_pool',
       ],
       package_data={'graphite' :
         ['templates/*', 'local_settings.py.example']},
       scripts=glob('bin/*'),
-      data_files=webapp_content.items() + storage_dirs + conf_files + examples,
-      install_requires=['Django>=1.9,<1.9.99', 'django-tagging==0.4.3', 'pytz', 'pyparsing==1.5.7', 'cairocffi'],
+      data_files=list(webapp_content.items()) + storage_dirs + conf_files + examples,
+      install_requires=['Django>=1.8,<2.3', 'django-tagging==0.4.3', 'pytz', 'pyparsing', 'cairocffi', 'urllib3', 'scandir', 'six'],
       classifiers=[
           'Intended Audience :: Developers',
           'Natural Language :: English',
@@ -102,7 +123,14 @@ try:
           'Programming Language :: Python',
           'Programming Language :: Python :: 2',
           'Programming Language :: Python :: 2.7',
-          'Programming Language :: Python :: 2 :: Only',
+          'Programming Language :: Python :: 3',
+          'Programming Language :: Python :: 3.4',
+          'Programming Language :: Python :: 3.5',
+          'Programming Language :: Python :: 3.6',
+          'Programming Language :: Python :: 3.7',
+          'Programming Language :: Python :: 3.8',
+          'Programming Language :: Python :: Implementation :: CPython',
+          'Programming Language :: Python :: Implementation :: PyPy',
           ],
       **setup_kwargs
     )

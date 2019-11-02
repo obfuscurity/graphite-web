@@ -89,7 +89,18 @@ Paths also support the following wildcards, which allows you to identify more th
   All wildcards apply only within a single path element.  In other words, they do not include or cross dots (``.``).
   Therefore, ``servers.*`` will not match ``servers.ix02ehssvc04v.cpu.total.user``, while ``servers.*.*.*.*`` will.
 
-  
+Tagged Series
+^^^^^^^^^^^^^
+
+When querying tagged series, we start with the `seriesByTag <functions.html#graphite.render.functions.seriesByTag>`_ function:
+
+.. code-block:: none
+
+    # find all series that have tag1 set to value1
+    seriesByTag('tag1=value1')
+
+See :ref:`querying tagged series <querying-tagged-series>` for more detail on using `seriesByTag <functions.html#graphite.render.functions.seriesByTag>`_.
+
 Examples
 ^^^^^^^^
 
@@ -122,6 +133,16 @@ You can also run any number of :doc:`functions </functions>` on the various metr
 
   &target=averageSeries(company.server*.applicationInstance.requestsHandled)
   (draws 1 aggregate line)
+
+Multiple function calls can be chained together either by nesting them or by piping the result into another function (it will be passed to the piped function as its first parameter):
+
+.. code-block:: none
+
+  &target=movingAverage(aliasByNode(company.server*.applicationInstance.requestsHandled,1),"5min")
+  &target=aliasByNode(company.server*.applicationInstance.requestsHandled,1)|movingAverage("5min")
+  &target=company.server*.applicationInstance.requestsHandled|aliasByNode(1)|movingAverage("5min")
+  &target=movingAverage(company.server*.applicationInstance.requestsHandled|aliasByNode(1),"5min")
+  (these are all equivalent)
 
 The target param can also be repeated to graph multiple related metrics.
 
@@ -163,7 +184,7 @@ mon            30 Days (month)
 y              365 Days (year)
 ============== ===============
 
-ABSOLUTE_TIME is in the format HH:MM_YYMMDD, YYYYMMDD, MM/DD/YY, or any other
+ABSOLUTE_TIME is in the format HH:MM_YYYYMMDD, YYYYMMDD, MM/DD/YY, or any other
 ``at(1)``-compatible time format.
 
 ============= =======
@@ -452,7 +473,7 @@ areaAlpha
 ---------
 *Default: 1.0*
 
-Takes a floating point number between 0.0 and 1.0 
+Takes a floating point number between 0.0 and 1.0
 
 Sets the alpha (transparency) value of filled areas when using an areaMode_
 
@@ -463,7 +484,7 @@ areaMode
 *Default: none*
 
 Enables filling of the area below the graphed lines. Fill area is the same color as
-the line color associated with it. See areaAlpha_ to make this area transparent. 
+the line color associated with it. See areaAlpha_ to make this area transparent.
 Takes one of the following parameters which determines the fill mode to use:
 
 ``none``
@@ -477,7 +498,7 @@ Takes one of the following parameters which determines the fill mode to use:
   Each target line is displayed as the sum of all previous lines plus the value of the current line.
 
 .. _param-bgcolor:
-  
+
 bgcolor
 -------
 *Default: value from the [default] template in graphTemplates.conf*
@@ -510,7 +531,7 @@ darkgray     111,111,111
 darkgrey     111,111,111
 ============ =============
 
-RGB can be passed directly in the format #RRGGBB[AA] where RR, GG, and BB are 2-digit hex vaules for red, green and blue, respectively. AA is an optional addition describing the opacity ("alpha"). Where FF is fully opaque, 00 fully transparent.
+RGB can be passed directly in the format #RRGGBB[AA] where RR, GG, and BB are 2-digit hex values for red, green and blue, respectively. AA is an optional addition describing the opacity ("alpha"). Where FF is fully opaque, 00 fully transparent.
 
 Examples:
 
@@ -552,7 +573,7 @@ drawNullAsZero
 
 Converts any None (null) values in the displayed metrics to zero at render time.
 
-.. _param-fgcolor: 
+.. _param-fgcolor:
 
 fgcolor
 -------
@@ -878,9 +899,11 @@ max
 
 maxDataPoints
 -------------
-Set the maximum numbers of datapoints returned when using json content. 
+Set the maximum numbers of datapoints for each series returned when using json content.
 
-If the number of datapoints in a selected range exceeds the maxDataPoints value then the datapoints over the whole period are consolidated.
+If for any output series the number of datapoints in a selected range exceeds the maxDataPoints value then the datapoints over the whole period are consolidated.
+
+The function used to consolidate points can be set using the `consolidateBy <functions.html#graphite.render.functions.consolidateBy>`_ function.
 
 .. _param-minorGridLineColor:
 
@@ -983,6 +1006,14 @@ One of:
 ``minimum``
   THe minimum of non-null points in the series
 
+.. _param-pretty:
+
+pretty
+------
+*Default: <unset>*
+
+If set to 1 and combined with ``format=json``, outputs human-friendly json.
+
 .. _param-rightColor:
 
 rightColor
@@ -1045,7 +1076,7 @@ Example:
   &title=Apache Busy Threads, All Servers, Past 24h
 
 .. _param-tz:
-  
+
 tz
 --
 *Default: The timezone specified in local_settings.py*
@@ -1147,6 +1178,19 @@ Example:
 
   &width=650&height=250
 
+.. _param-xFilesFactor:
+
+xFilesFactor
+------------
+*Default: DEFAULT_XFILES_FACTOR specified in local_settings.py or 0*
+
+Sets the default `xFilesFactor` value used when performing runtime aggregation across multiple
+series and/or intervals.
+
+See the `xFilesFactor <functions.html#graphite.render.functions.setXFilesFactor>`_ function for
+more information on the `xFilesFactor` value and how the default can be overridden for specific
+targets or series.
+
 .. _param-xFormat:
 
 xFormat
@@ -1158,7 +1202,7 @@ Sets the time format used when displaying the X-axis. See
 for format specification details.
 
 .. _param-yAxisSide:
-  
+
 yAxisSide
 ---------
 *Default: left*
@@ -1166,15 +1210,15 @@ yAxisSide
 Sets the side of the graph on which to render the Y-axis. Accepts values of ``left`` or ``right``
 
 .. _param-yDivisors:
-  
+
 yDivisors
 ---------
 *Default: 4,5,6*
 
 Sets the preferred number of intermediate values to display on the Y-axis (Y values between the
-minimum and maximum).  Note that Graphite will ultimately choose what values (and how many) to 
-display based on a 'pretty' factor, which tries to maintain a sensible scale (e.g. preferring 
-intermediary values like 25%,50%,75% over 33.3%,66.6%).  To explicitly set the Y-axis values, 
+minimum and maximum).  Note that Graphite will ultimately choose what values (and how many) to
+display based on a 'pretty' factor, which tries to maintain a sensible scale (e.g. preferring
+intermediary values like 25%,50%,75% over 33.3%,66.6%).  To explicitly set the Y-axis values,
 see `yStep`_
 
 .. _param-yLimit:
@@ -1251,7 +1295,7 @@ yMinRight
 In dual Y-axis mode, sets the lower bound of the right Y-Axis (See: `yMin`_)
 
 .. _param-yStep:
-  
+
 yStep
 -----
 *Default: Calculated automatically*

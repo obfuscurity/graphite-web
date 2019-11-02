@@ -15,3 +15,8 @@ docs/_build
 .idea
 *.iml
 storage
+webapp/coverage.xml
+webapp/.coverage
+webapp/htmlcov
+webapp/static
+webapp/static/**/*

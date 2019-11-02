@@ -15,16 +15,28 @@ limitations under the License."""
 # Django settings for graphite project.
 # DO NOT MODIFY THIS FILE DIRECTLY - use local_settings.py instead
 from os.path import dirname, join, abspath
-
+from django import VERSION as DJANGO_VERSION
+try:
+    import raven
+except ImportError:
+    raven = None
+try:
+    import whitenoise
+except ImportError:
+    whitenoise = False
+else:
+    whitenoise_version = tuple(map(
+            int, getattr(whitenoise, '__version__', '0').split('.')))
+    # Configure WhiteNoise < 3.2 from wsgi.py
+    # http://whitenoise.evans.io/en/stable/changelog.html#v4-0
+    if whitenoise_version < (3, 2):
+        whitenoise = False
 
 #Django settings below, do not touch!
 APPEND_SLASH = False
 TEMPLATE_DEBUG = False
-CACHES = {
-    'default': {
-        'BACKEND': 'django.core.cache.backends.dummy.DummyCache',
-    },
-}
+
+SILENCED_SYSTEM_CHECKS = ['urls.W002']
 
 TEMPLATES = [
     {
@@ -61,7 +73,7 @@ MEDIA_ROOT = ''
 # Example: "http://media.lawrence.com"
 MEDIA_URL = ''
 
-MIDDLEWARE_CLASSES = (
+MIDDLEWARE = (
   'graphite.middleware.LogExceptionsMiddleware',
   'django.middleware.common.CommonMiddleware',
   'django.middleware.gzip.GZipMiddleware',
@@ -70,25 +82,40 @@ MIDDLEWARE_CLASSES = (
   'django.contrib.messages.middleware.MessageMiddleware',
 )
 
+if whitenoise:
+    MIDDLEWARE += ('whitenoise.middleware.WhiteNoiseMiddleware', )
+
+# SessionAuthenticationMiddleware is enabled by default since 1.10 and
+# deprecated since 2.0
+if DJANGO_VERSION < (1, 10):
+    MIDDLEWARE_CLASSES = MIDDLEWARE + \
+        ('django.contrib.auth.middleware.SessionAuthenticationMiddleware',)
+
 ROOT_URLCONF = 'graphite.urls'
 
 INSTALLED_APPS = (
-  'graphite.metrics',
-  'graphite.render',
+  'graphite.account',
   'graphite.browser',
   'graphite.composer',
-  'graphite.account',
   'graphite.dashboard',
-  'graphite.whitelist',
   'graphite.events',
+  'graphite.functions',
+  'graphite.metrics',
+  'graphite.render',
+  'graphite.tags',
   'graphite.url_shortener',
+  'graphite.whitelist',
   'django.contrib.auth',
   'django.contrib.sessions',
   'django.contrib.admin',
   'django.contrib.contenttypes',
+  'django.contrib.messages',
   'django.contrib.staticfiles',
   'tagging',
 )
+if raven is not None:
+    INSTALLED_APPS = INSTALLED_APPS + ('raven.contrib.django.raven_compat',)
+
 
 AUTHENTICATION_BACKENDS = ['django.contrib.auth.backends.ModelBackend']
 

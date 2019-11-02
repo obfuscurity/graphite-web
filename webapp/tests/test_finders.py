@@ -1,22 +1,43 @@
+from __future__ import absolute_import
+
 import gzip
 import os
 from os.path import join, dirname, isdir
 import random
 import shutil
 import time
+import unittest
+from six.moves import range
 
-from django.test import TestCase
+try:
+    from unittest.mock import patch
+except ImportError:
+    from mock import patch
+
+try:
+    import ceres
+except ImportError:
+    ceres = False
+try:
+    import whisper
+except ImportError:
+    whisper = False
+
 from django.conf import settings
 
 from graphite.intervals import Interval, IntervalSet
 from graphite.node import LeafNode, BranchNode
-from graphite.storage import Store, FindQuery, get_finder
-import ceres
-import whisper
+from graphite.storage import Store, FindQuery, get_finders
+from graphite.finders.standard import scandir
+from graphite.finders import get_real_metric_path
+from graphite.finders.utils import BaseFinder
+from graphite.readers.utils import BaseReader
+from tests.base import TestCase
+
 
 class FinderTest(TestCase):
     def test_custom_finder(self):
-        store = Store(finders=[get_finder('tests.test_finders.DummyFinder')])
+        store = Store(finders=get_finders('tests.test_finders.DummyFinder'))
         nodes = list(store.find("foo"))
         self.assertEqual(len(nodes), 1)
         self.assertEqual(nodes[0].path, 'foo')
@@ -30,14 +51,30 @@ class FinderTest(TestCase):
         self.assertEqual(time_info, (100, 200, 10))
         self.assertEqual(len(series), 10)
 
-class DummyReader(object):
+    def test_legacy_finder(self):
+        store = Store(finders=get_finders('tests.test_finders.LegacyFinder'))
+        nodes = list(store.find("foo"))
+        self.assertEqual(len(nodes), 1)
+        self.assertEqual(nodes[0].path, 'foo')
+
+        nodes = list(store.find('bar.*'))
+        self.assertEqual(len(nodes), 10)
+        node = nodes[0]
+        self.assertEqual(node.path.split('.')[0], 'bar')
+
+        time_info, series = node.fetch(100, 200)
+        self.assertEqual(time_info, (100, 200, 10))
+        self.assertEqual(len(series), 10)
+
+
+class DummyReader(BaseReader):
     __slots__ = ('path',)
 
     def __init__(self, path):
         self.path = path
 
     def fetch(self, start_time, end_time):
-        npoints = (end_time - start_time) / 10
+        npoints = (end_time - start_time) // 10
         return (start_time, end_time, 10), [
             random.choice([None, 1, 2, 3]) for i in range(npoints)
         ]
@@ -46,22 +83,34 @@ class DummyReader(object):
         return IntervalSet([Interval(time.time() - 3600, time.time())])
 
 
-class DummyFinder(object):
+class DummyFinder(BaseFinder):
     def find_nodes(self, query):
         if query.pattern == 'foo':
             yield BranchNode('foo')
 
         elif query.pattern == 'bar.*':
-            for i in xrange(10):
+            for i in range(10):
+                path = 'bar.{0}'.format(i)
+                yield LeafNode(path, DummyReader(path))
+
+
+class LegacyFinder(object):
+    def find_nodes(self, query):
+        if query.pattern == 'foo':
+            yield BranchNode('foo')
+
+        elif query.pattern == 'bar.*':
+            for i in range(10):
                 path = 'bar.{0}'.format(i)
                 yield LeafNode(path, DummyReader(path))
 
 
 class StandardFinderTest(TestCase):
-    _listdir_counter = 0
-    _original_listdir = os.listdir
 
     test_dir = settings.WHISPER_DIR
+
+    def scandir_mock(d):
+        return scandir(d)
 
     def create_whisper(self, path, gz=False):
         path = join(self.test_dir, path)
@@ -82,112 +131,144 @@ class StandardFinderTest(TestCase):
         if not isdir(self.test_dir):
             os.makedirs(self.test_dir)
 
-    def test_standard_finder(self):
-        def listdir_mock(d):
-            self._listdir_counter += 1
-            return self._original_listdir(d)
-
+    @patch('graphite.finders.standard.scandir', wraps=scandir_mock)
+    def test_standard_finder(self,scandir_mock):
         try:
-            os.listdir = listdir_mock
             self.create_whisper('foo.wsp')
             self.create_whisper(join('foo', 'bar', 'baz.wsp'))
             self.create_whisper(join('bar', 'baz', 'foo.wsp'))
-            finder = get_finder('graphite.finders.standard.StandardFinder')
+            self.create_whisper(join('_tagged', '9c6', '79b', 'foo;bar=baz.wsp'))
+            self.create_whisper(join(
+              '_tagged',
+              'b34',
+              '2de',
+              # foo;bar=baz2
+              'b342defa10cb579981c63ef78be5ac248f681f4bd2c35bc0209d3a7b9eb99346.wsp'
+            ))
 
-            self._listdir_counter = 0
+            finder = get_finders('graphite.finders.standard.StandardFinder')[0]
+
+            scandir_mock.call_count = 0
             nodes = finder.find_nodes(FindQuery('foo', None, None))
             self.assertEqual(len(list(nodes)), 2)
-            self.assertEqual(self._listdir_counter, 0)
+            self.assertEqual(scandir_mock.call_count, 0)
 
-            self._listdir_counter = 0
+            scandir_mock.call_count = 0
             nodes = finder.find_nodes(FindQuery('foo.bar.baz', None, None))
             self.assertEqual(len(list(nodes)), 1)
-            self.assertEqual(self._listdir_counter, 0)
+            self.assertEqual(scandir_mock.call_count, 0)
 
-            self._listdir_counter = 0
+            scandir_mock.call_count = 0
             nodes = finder.find_nodes(FindQuery('*.ba?.{baz,foo}', None, None))
             self.assertEqual(len(list(nodes)), 2)
-            self.assertEqual(self._listdir_counter, 5)
+            self.assertEqual(scandir_mock.call_count, 4)
 
-            self._listdir_counter = 0
+            scandir_mock.call_count = 0
             nodes = finder.find_nodes(FindQuery('{foo,bar}.{baz,bar}.{baz,foo}', None, None))
             self.assertEqual(len(list(nodes)), 2)
-            self.assertEqual(self._listdir_counter, 5)
+            self.assertEqual(scandir_mock.call_count, 0)
 
-            self._listdir_counter = 0
+            scandir_mock.call_count = 0
             nodes = finder.find_nodes(FindQuery('{foo}.bar.*', None, None))
             self.assertEqual(len(list(nodes)), 1)
-            self.assertEqual(self._listdir_counter, 2)
+            self.assertEqual(scandir_mock.call_count, 1)
 
-            self._listdir_counter = 0
+            scandir_mock.call_count = 0
             nodes = finder.find_nodes(FindQuery('foo.{ba{r,z},baz}.baz', None, None))
             self.assertEqual(len(list(nodes)), 1)
-            self.assertEqual(self._listdir_counter, 1)
+            self.assertEqual(scandir_mock.call_count, 0)
 
-            self._listdir_counter = 0
+            scandir_mock.call_count = 0
             nodes = finder.find_nodes(FindQuery('{foo,garbage}.bar.baz', None, None))
             self.assertEqual(len(list(nodes)), 1)
-            self.assertEqual(self._listdir_counter, 1)
+            self.assertEqual(scandir_mock.call_count, 0)
 
-            self._listdir_counter = 0
+            scandir_mock.call_count = 0
             nodes = finder.find_nodes(FindQuery('{fo{o}}.bar.baz', None, None))
             self.assertEqual(len(list(nodes)), 1)
-            self.assertEqual(self._listdir_counter, 1)
+            self.assertEqual(scandir_mock.call_count, 0)
 
-            self._listdir_counter = 0
+            scandir_mock.call_count = 0
             nodes = finder.find_nodes(FindQuery('foo{}.bar.baz', None, None))
             self.assertEqual(len(list(nodes)), 1)
-            self.assertEqual(self._listdir_counter, 1)
+            self.assertEqual(scandir_mock.call_count, 0)
 
-            self._listdir_counter = 0
+            scandir_mock.call_count = 0
             nodes = finder.find_nodes(FindQuery('{fo,ba}{o}.bar.baz', None, None))
             self.assertEqual(len(list(nodes)), 1)
-            self.assertEqual(self._listdir_counter, 1)
+            self.assertEqual(scandir_mock.call_count, 0)
 
-            self._listdir_counter = 0
+            scandir_mock.call_count = 0
             nodes = finder.find_nodes(FindQuery('{fo,ba}{o,o}.bar.baz', None, None))
             self.assertEqual(len(list(nodes)), 1)
-            self.assertEqual(self._listdir_counter, 1)
+            self.assertEqual(scandir_mock.call_count, 0)
 
-            self._listdir_counter = 0
+            scandir_mock.call_count = 0
             nodes = finder.find_nodes(FindQuery('{fo,ba}{o,z}.bar.baz', None, None))
             self.assertEqual(len(list(nodes)), 1)
-            self.assertEqual(self._listdir_counter, 1)
+            self.assertEqual(scandir_mock.call_count, 0)
+
+            scandir_mock.call_count = 0
+            nodes = finder.find_nodes(FindQuery('foo;bar=baz', None, None))
+            self.assertEqual(len(list(nodes)), 1)
+            self.assertEqual(scandir_mock.call_count, 0)
+
+            scandir_mock.call_count = 0
+            nodes = finder.find_nodes(FindQuery('foo;bar=baz2', None, None))
+            self.assertEqual(len(list(nodes)), 1)
+            self.assertEqual(scandir_mock.call_count, 0)
+
+            results = finder.fetch(['foo'], 0, 1)
+            self.assertEqual(results, [])
 
         finally:
-            os.listdir = self._original_listdir
+            scandir_mock.call_count = 0
             self.wipe_whisper()
 
-    def test_standard_finder_gzipped_whisper(self):
-        def listdir_mock(d):
-            self._listdir_counter += 1
-            return self._original_listdir(d)
-
+    @patch('graphite.finders.standard.scandir', wraps=scandir_mock)
+    def test_standard_finder_gzipped_whisper(self, scandir_mock):
         try:
-            os.listdir = listdir_mock
             self.create_whisper('foo.wsp', True)
             self.create_whisper(join('foo', 'bar', 'baz.wsp'), True)
             self.create_whisper(join('bar', 'baz', 'foo.wsp'))
-            finder = get_finder('graphite.finders.standard.StandardFinder')
+            finder = get_finders('graphite.finders.standard.StandardFinder')[0]
 
-            self._listdir_counter = 0
+            scandir_mock.call_count = 0
             nodes = finder.find_nodes(FindQuery('foo', None, None))
             self.assertEqual(len(list(nodes)), 2)
-            self.assertEqual(self._listdir_counter, 0)
+            self.assertEqual(scandir_mock.call_count, 0)
 
-            self._listdir_counter = 0
+            scandir_mock.call_count = 0
             nodes = finder.find_nodes(FindQuery('foo{}.bar.baz', None, None))
             self.assertEqual(len(list(nodes)), 1)
-            self.assertEqual(self._listdir_counter, 1)
+            self.assertEqual(scandir_mock.call_count, 0)
 
         finally:
-            os.listdir = self._original_listdir
+            scandir_mock.call_count = 0
+            self.wipe_whisper()
+
+    def test_standard_finder_tagged_whisper_carbonlink(self):
+        try:
+            self.create_whisper(join(
+              '_tagged',
+              'b34',
+              '2de',
+              # foo;bar=baz2
+              'b342defa10cb579981c63ef78be5ac248f681f4bd2c35bc0209d3a7b9eb99346.wsp'
+            ))
+
+            finder = get_finders('graphite.finders.standard.StandardFinder')[0]
+
+            nodes = list(finder.find_nodes(FindQuery('foo;bar=baz2', None, None)))
+            self.assertEqual(len(nodes), 1)
+            self.assertEqual(nodes[0].reader.real_metric_path, 'foo;bar=baz2')
+
+        finally:
             self.wipe_whisper()
 
     def test_globstar(self):
         self.addCleanup(self.wipe_whisper)
-        finder = get_finder('graphite.finders.standard.StandardFinder')
-        store  = Store(finders=[finder])
+        store  = Store(finders=get_finders('graphite.finders.standard.StandardFinder'))
 
         query = "x.**.x"
         hits = ["x.x", "x._.x", "x._._.x"]
@@ -204,8 +285,7 @@ class StandardFinderTest(TestCase):
 
     def test_multiple_globstars(self):
         self.addCleanup(self.wipe_whisper)
-        finder = get_finder('graphite.finders.standard.StandardFinder')
-        store  = Store(finders=[finder])
+        store  = Store(finders=get_finders('graphite.finders.standard.StandardFinder'))
 
         query = "x.**.x.**.x"
         hits = ["x.x.x", "x._.x.x", "x.x._.x", "x._.x._.x", "x._._.x.x", "x.x._._.x"]
@@ -222,8 +302,7 @@ class StandardFinderTest(TestCase):
 
     def test_terminal_globstar(self):
         self.addCleanup(self.wipe_whisper)
-        finder = get_finder('graphite.finders.standard.StandardFinder')
-        store  = Store(finders=[finder])
+        store  = Store(finders=get_finders('graphite.finders.standard.StandardFinder'))
 
         query = "x.**"
         hits = ["x._", "x._._", "x._._._"]
@@ -239,11 +318,39 @@ class StandardFinderTest(TestCase):
             self.assertNotIn(miss, paths)
             self.wipe_whisper()
 
+    def dummy_realpath(path):
+        return path.replace("some/symbolic/path", "this/is/the/real/path")
+
+    def dummy_realpath2(path):
+        return path.replace("foo/bar", "bar")
+
+    @patch('os.path.realpath', wraps=dummy_realpath)
+    def test_get_real_metric_path_symlink_before(self, dummy_realpath):
+        input_abs_path='/some/symbolic/path/graphite/whisper/Env/HTTP/NumConnections.wsp'
+        input_metric_path='Env.HTTP.NumConnections'
+        expected_metric_path='Env.HTTP.NumConnections'
+        output_metric_path = get_real_metric_path(input_abs_path, input_metric_path)
+        self.assertEqual(output_metric_path, expected_metric_path)
+
+    @patch('os.path.realpath', wraps=dummy_realpath2)
+    def test_get_real_metric_path_symlink_inside(self, dummy_realpath2):
+        input_abs_path='/opt/graphite/storage/whisper/foo/bar/Env/HTTP/NumConnections.wsp'
+        input_metric_path='bar.Env.HTTP.NumConnections'
+        expected_metric_path='bar.Env.HTTP.NumConnections'
+        output_metric_path = get_real_metric_path(input_abs_path, input_metric_path)
+        self.assertEqual(output_metric_path, expected_metric_path)
+
+    @patch('os.path.realpath', wraps=dummy_realpath)
+    def test_get_real_metric_path_symlink_after(self, dummy_realpath):
+        input_abs_path='/opt/graphite/storage/whisper/some/symbolic/path/NumConnections.wsp'
+        input_metric_path='some.symbolic.path.NumConnections'
+        expected_metric_path='this.is.the.real.path.NumConnections'
+        output_metric_path = get_real_metric_path(input_abs_path, input_metric_path)
+        self.assertEqual(output_metric_path, expected_metric_path)
+
 
 class CeresFinderTest(TestCase):
-    _listdir_counter = 0
-    _original_listdir = os.listdir
-
+    @unittest.skipIf(not ceres, 'ceres not installed')
     def test_ceres_finder(self):
         test_dir = join(settings.CERES_DIR)
 
@@ -263,52 +370,59 @@ class CeresFinderTest(TestCase):
             except OSError:
                 pass
 
-        def listdir_mock(d):
-            self._listdir_counter += 1
-            return self._original_listdir(d)
+        self.addCleanup(wipe_ceres)
 
-        try:
-            os.listdir = listdir_mock
-            create_ceres('foo')
-            create_ceres('foo.bar.baz')
-            create_ceres('bar.baz.foo')
+        create_ceres('foo')
+        create_ceres('foo.bar.baz')
+        create_ceres('bar.baz.foo')
+        create_ceres(
+            # foo;bar=baz
+            '_tagged.9c6.79b.foo;bar=baz'
+        )
+        create_ceres(
+            # foo;bar=baz2
+            '_tagged.b34.2de.b342defa10cb579981c63ef78be5ac248f681f4bd2c35bc0209d3a7b9eb99346'
+        )
 
-            finder = get_finder('graphite.finders.ceres.CeresFinder')
+        finder = get_finders('graphite.finders.ceres.CeresFinder')[0]
 
-            self._listdir_counter = 0
-            nodes = finder.find_nodes(FindQuery('foo', None, None))
-            self.assertEqual(len(list(nodes)), 1)
-            self.assertEqual(self._listdir_counter, 2)
+        nodes = finder.find_nodes(FindQuery('foo', None, None))
+        self.assertEqual(len(list(nodes)), 1)
 
-            self._listdir_counter = 0
-            nodes = finder.find_nodes(FindQuery('foo.bar.baz', None, None))
-            self.assertEqual(len(list(nodes)), 1)
-            self.assertEqual(self._listdir_counter, 2)
+        nodes = finder.find_nodes(FindQuery('foo.bar.baz', None, None))
+        self.assertEqual(len(list(nodes)), 1)
 
-            # No data in the expected time period
-            self._listdir_counter = 0
-            nodes = finder.find_nodes(FindQuery('foo.bar.baz', 10000, 10060))
-            self.assertEqual(len(list(nodes)), 0)
-            self.assertEqual(self._listdir_counter, 1)
+        # No data in the expected time period
+        nodes = finder.find_nodes(FindQuery('foo.bar.baz', 10000, 10060))
+        self.assertEqual(len(list(nodes)), 0)
 
-            self._listdir_counter = 0
-            nodes = finder.find_nodes(FindQuery('foo.bar', None, None))
-            self.assertEqual(len(list(nodes)), 1)
-            self.assertEqual(self._listdir_counter, 0)
+        nodes = finder.find_nodes(FindQuery('foo.bar', None, None))
+        self.assertEqual(len(list(nodes)), 1)
 
-            self._listdir_counter = 0
-            nodes = finder.find_nodes(FindQuery('*.ba?.{baz,foo}', None, None))
-            self.assertEqual(len(list(nodes)), 2)
-            self.assertEqual(self._listdir_counter, 10)
+        nodes = finder.find_nodes(FindQuery('*.ba?.{baz,foo}', None, None))
+        self.assertEqual(len(list(nodes)), 2)
 
-            # Search for something that isn't valid Ceres content
-            fh = open(join(test_dir, 'foo', 'blah'), 'wb')
-            fh.close()
-            self._listdir_counter = 0
-            nodes = finder.find_nodes(FindQuery('foo.blah', None, None))
-            self.assertEqual(len(list(nodes)), 0)
-            self.assertEqual(self._listdir_counter, 0)
+        nodes = finder.find_nodes(FindQuery('{bar,foo}.{bar,baz}.{baz,foo}', None, None))
+        self.assertEqual(len(list(nodes)), 2)
 
-        finally:
-            os.listdir = self._original_listdir
-            wipe_ceres()
+        nodes = finder.find_nodes(FindQuery('foo;bar=baz', None, None))
+        self.assertEqual(len(list(nodes)), 1)
+
+        nodes = finder.find_nodes(FindQuery('foo;bar=baz2', None, None))
+        self.assertEqual(len(list(nodes)), 1)
+
+        # Search for something that isn't valid Ceres content
+        fh = open(join(test_dir, 'foo', 'blah'), 'wb')
+        fh.close()
+        nodes = finder.find_nodes(FindQuery('foo.blah', None, None))
+        self.assertEqual(len(list(nodes)), 0)
+
+        # get index
+        result = finder.get_index({})
+        self.assertEqual(result, [
+          '_tagged.9c6.79b.foo;bar=baz',
+          '_tagged.b34.2de.b342defa10cb579981c63ef78be5ac248f681f4bd2c35bc0209d3a7b9eb99346',
+          'bar.baz.foo',
+          'foo',
+          'foo.bar.baz',
+        ])

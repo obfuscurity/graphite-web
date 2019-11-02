@@ -1,6 +1,28 @@
 Installing Graphite
 ===================
 
+Docker
+------
+
+Try Graphite in Docker and have it running in seconds:
+
+.. code-block:: none
+
+    docker run -d \
+     --name graphite \
+     --restart=always \
+     -p 80:80 \
+     -p 2003-2004:2003-2004 \
+     -p 2023-2024:2023-2024 \
+     -p 8125:8125/udp \
+     -p 8126:8126 \
+     graphiteapp/graphite-statsd
+
+Check `docker repo`_ for details.
+
+This is portable, fast and easy to use. Or use instructions below for installation.
+
+
 Dependencies
 ------------
 Graphite renders graphs using the Cairo graphics library. This adds dependencies on
@@ -11,11 +33,12 @@ been met or not.
 Basic Graphite requirements:
 
 * a UNIX-like Operating System
-* Python 2.7 or greater but `NOT Python 3`
+* Python 2.7 or greater (including experimental Python3 support)
 * `cairocffi`_
-* `Django`_ 1.9
-* `django-tagging`_ 0.4.3
+* `Django`_ 1.8 - 2.2 (for Python3 - 1.11 and newer), 1.11.19 or newer is recommended 
+* `django-tagging`_ 0.4.6 (not `django-taggit` yet)
 * `pytz`_
+* `scandir`_
 * `fontconfig`_ and at least one font package (a system package usually)
 * A WSGI server and web server. Popular choices are:
 
@@ -32,7 +55,7 @@ There are also several other dependencies required for additional features:
 
 * Render caching: `memcached`_ and `python-memcache`_
 * LDAP authentication: `python-ldap`_ (for LDAP authentication support in the webapp)
-* AMQP support: `txamqp`_
+* AMQP support: `txamqp`_ (version 0.8 is required)
 * RRD support: `python-rrdtool`_
 * Dependent modules for additional database support (MySQL, PostgreSQL, etc). See `Django database install`_ instructions and the `Django database`_ documentation for details
 
@@ -86,6 +109,10 @@ Carbon and Graphite-web are installed in ``/opt/graphite/`` with the following l
   - ``whisper``
 
     Location for Whisper data files to be stored and read
+
+  - ``ceres``
+
+    Location for Ceres data files to be stored and read
 
 - ``webapp/``
 
@@ -159,7 +186,7 @@ Post-Install Tasks
 
 Windows Users
 -------------
-Despair Not!  Even though running Graphite on Windows is completely unsupported (we fear that handling the escaping of paths in the regexes would result only in jibbering madness, and life is just too short; pull requests happily considered!), you are not completely out of luck.  There are some solutions that make it easier for you to run a UNIX VM within your Windows box.  The :doc:`Installing via Synthesize </install-synthesize>` article will help you set up a Vagrant VM that will run Graphite.  In order to leverage this, you will need to install `Vagrant <https://www.vagrantup.com/>`_.
+Unfortunately, native Graphite on Windows is completely unsupported, but you can run Graphite on Windows in `Docker`_ or the :doc:`Installing via Synthesize </install-synthesize>` article will help you set up a Vagrant VM that will run Graphite.  In order to leverage this, you will need to install `Vagrant <https://www.vagrantup.com/>`_.
 
 
 .. _Apache: https://projects.apache.org/project.html?httpd-http_server
@@ -181,6 +208,8 @@ Despair Not!  Even though running Graphite on Windows is completely unsupported 
 .. _python-rrdtool: http://oss.oetiker.ch/rrdtool/prog/rrdpython.en.html
 .. _python-sqlite2: https://github.com/ghaering/pysqlite
 .. _pytz: https://pypi.python.org/pypi/pytz/
-.. _simplejson: http://simplejson.readthedocs.io/
+.. _scandir: https://pypi.python.org/pypi/scandir
 .. _txAMQP: https://launchpad.net/txamqp/
 .. _uWSGI: http://uwsgi-docs.readthedocs.io/
+.. _Docker: https://www.docker.com/
+.. _docker repo: https://github.com/graphite-project/docker-graphite-statsd

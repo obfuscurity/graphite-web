@@ -13,16 +13,22 @@ See the License for the specific language governing permissions and
 limitations under the License."""
 # Django settings for graphite project.
 # DO NOT MODIFY THIS FILE DIRECTLY - use local_settings.py instead
+from __future__ import print_function
 import os
 import sys
 from os.path import abspath, dirname, join
 from warnings import warn
+from importlib import import_module
 
-from django.core.urlresolvers import reverse_lazy
+from django import VERSION as DJANGO_VERSION
+try:
+    from django.urls import reverse_lazy
+except ImportError:  # Django < 1.10
+    from django.core.urlresolvers import reverse_lazy
 
 
 GRAPHITE_WEB_APP_SETTINGS_LOADED = False
-WEBAPP_VERSION = '0.10.0-alpha'
+WEBAPP_VERSION = '1.2.0-dev'
 DEBUG = False
 JAVASCRIPT_DEBUG = False
 
@@ -49,15 +55,30 @@ WHISPER_DIR = ''
 RRD_DIR = ''
 STANDARD_DIRS = []
 
+# Timeout settings
+FIND_TIMEOUT = None  # default 3.0 see below
+FETCH_TIMEOUT = None  # default 6.0 see below
+
 # Cluster settings
 CLUSTER_SERVERS = []
-# This settings control wether https is used to communicate between cluster members
+
+# Worker Pool
+USE_WORKER_POOL = True
+POOL_MAX_WORKERS = 10
+
+# This settings control whether https is used to communicate between cluster members
 INTRACLUSTER_HTTPS = False
-REMOTE_FIND_TIMEOUT = 3.0
-REMOTE_FETCH_TIMEOUT = 3.0
+REMOTE_FIND_TIMEOUT = None  # Replaced by FIND_TIMEOUT
+REMOTE_FETCH_TIMEOUT = None  # Replaced by FETCH_TIMEOUT
 REMOTE_RETRY_DELAY = 60.0
 REMOTE_EXCLUDE_LOCAL = False
+STORE_FAIL_ON_ERROR = False
 REMOTE_STORE_MERGE_RESULTS = True
+REMOTE_STORE_FORWARD_HEADERS = []
+REMOTE_STORE_USE_POST = False
+REMOTE_BUFFER_SIZE = 1024 * 1024 # Set to 0 to prevent streaming deserialization
+
+# Carbonlink settings
 CARBON_METRIC_PREFIX='carbon'
 CARBONLINK_HOSTS = ["127.0.0.1:7002"]
 CARBONLINK_TIMEOUT = 1.0
@@ -65,35 +86,78 @@ CARBONLINK_HASHING_KEYFUNC = None
 CARBONLINK_HASHING_TYPE = 'carbon_ch'
 CARBONLINK_RETRY_DELAY = 15
 REPLICATION_FACTOR = 1
+
+# Cache settings.
 MEMCACHE_HOSTS = []
 MEMCACHE_KEY_PREFIX = ''
+MEMCACHE_OPTIONS = {}
 CACHES={}
 FIND_CACHE_DURATION = 300
 FIND_TOLERANCE = 2 * FIND_CACHE_DURATION
 DEFAULT_CACHE_DURATION = 60 #metric data and graphs are cached for one minute by default
 DEFAULT_CACHE_POLICY = []
 
+# this setting controls the default xFilesFactor used for query-time aggregration
+DEFAULT_XFILES_FACTOR = 0
+
+# These can also be configured using:
+# https://docs.djangoproject.com/en/1.11/topics/logging/
+LOG_RENDERING_PERFORMANCE = False
 LOG_CACHE_PERFORMANCE = False
 LOG_ROTATION = True
 LOG_ROTATION_COUNT = 1
+
+LOG_FILE_INFO = 'info.log'
+LOG_FILE_EXCEPTION = 'exception.log'
+LOG_FILE_CACHE = 'cache.log'
+LOG_FILE_RENDERING = 'rendering.log'
+
 MAX_FETCH_RETRIES = 2
+
+# This settings limit metrics find to prevent from too large query
+METRICS_FIND_WARNING_THRESHOLD = float('Inf') # Print a warning if more than X metrics are returned
+METRICS_FIND_FAILURE_THRESHOLD = float('Inf') # Fail if more than X metrics are returned
 
 #Remote rendering settings
 REMOTE_RENDERING = False #if True, rendering is delegated to RENDERING_HOSTS
 RENDERING_HOSTS = []
 REMOTE_RENDER_CONNECT_TIMEOUT = 1.0
-LOG_RENDERING_PERFORMANCE = False
 
 #Miscellaneous settings
-SMTP_SERVER = "localhost"
-DOCUMENTATION_URL = "http://graphite.readthedocs.io/"
+DOCUMENTATION_VERSION = 'latest' if 'dev' in WEBAPP_VERSION else WEBAPP_VERSION
+DOCUMENTATION_URL = 'https://graphite.readthedocs.io/en/{}/'.format(DOCUMENTATION_VERSION)
 ALLOW_ANONYMOUS_CLI = True
 LEGEND_MAX_ITEMS = 10
 RRD_CF = 'AVERAGE'
 STORAGE_FINDERS = (
+    'graphite.finders.remote.RemoteFinder',
     'graphite.finders.standard.StandardFinder',
 )
-MIDDLEWARE_CLASSES=''
+
+# TagDB settings
+TAGDB = 'graphite.tags.localdatabase.LocalDatabaseTagDB'
+
+TAGDB_CACHE_DURATION = 60
+
+TAGDB_AUTOCOMPLETE_LIMIT = 100
+
+TAGDB_REDIS_HOST = 'localhost'
+TAGDB_REDIS_PORT = 6379
+TAGDB_REDIS_DB = 0
+TAGDB_REDIS_PASSWORD = ''
+
+TAGDB_HTTP_URL = ''
+TAGDB_HTTP_USER = ''
+TAGDB_HTTP_PASSWORD = ''
+TAGDB_HTTP_AUTOCOMPLETE = False
+
+# Function plugins
+FUNCTION_PLUGINS = []
+
+
+MIDDLEWARE = ()
+if DJANGO_VERSION < (1, 10):
+    MIDDLEWARE_CLASSES = MIDDLEWARE
 MAX_TAG_LENGTH = 50
 AUTO_REFRESH_INTERVAL = 60
 
@@ -107,14 +171,23 @@ LDAP_BASE_USER = "" # "CN=some_readonly_account,DC=mydomain,DC=com"
 LDAP_BASE_PASS = "" # "my_password"
 LDAP_USER_QUERY = "" # "(username=%s)"  For Active Directory use "(sAMAccountName=%s)"
 LDAP_URI = None
+LDAP_USER_DN_TEMPLATE = None
 
 #Set this to True to delegate authentication to the web server
 USE_REMOTE_USER_AUTHENTICATION = False
 REMOTE_USER_BACKEND = "" # Provide an alternate or subclassed backend
+REMOTE_USER_MIDDLEWARE = "" # Provide an alternate or subclassed middleware
 AUTHENTICATION_BACKENDS=[]
 
 # Django 1.5 requires this so we set a default but warn the user
 SECRET_KEY = 'UNSAFE_DEFAULT'
+
+# Input validation
+# - When False we still validate the received input parameters, but if validation
+#   detects an issue it only logs an error and doesn't directly reject the request
+# - When True we reject requests of which the input validation detected an issue with the
+#   provided arguments and return an error message to the user
+ENFORCE_INPUT_VALIDATION = False
 
 # Django 1.5 requires this to be set. Here we default to prior behavior and allow all
 ALLOWED_HOSTS = [ '*' ]
@@ -141,18 +214,24 @@ DATABASES = None
 FLUSHRRDCACHED = ''
 
 ## Load our local_settings
+SETTINGS_MODULE = os.environ.get('GRAPHITE_SETTINGS_MODULE', 'graphite.local_settings')
 try:
-  from graphite.local_settings import *  # noqa
+  globals().update(import_module(SETTINGS_MODULE).__dict__)
 except ImportError:
-  print >> sys.stderr, "Could not import graphite.local_settings, using defaults!"
+  print("Could not import {0}, using defaults!".format(SETTINGS_MODULE), file=sys.stderr)
 
 ## Load Django settings if they werent picked up in local_settings
 if not GRAPHITE_WEB_APP_SETTINGS_LOADED:
   from graphite.app_settings import *  # noqa
 
+
 STATICFILES_DIRS = (
     join(WEBAPP_DIR, 'content'),
 )
+
+# Handle renamed timeout settings
+FIND_TIMEOUT = FIND_TIMEOUT or REMOTE_FIND_TIMEOUT or 3.0
+FETCH_TIMEOUT = FETCH_TIMEOUT or REMOTE_FETCH_TIMEOUT or 6.0
 
 ## Set config dependent on flags set in local_settings
 # Path configuration
@@ -186,7 +265,13 @@ if not STANDARD_DIRS:
     if os.path.exists(WHISPER_DIR):
       STANDARD_DIRS.append(WHISPER_DIR)
   except ImportError:
-    print >> sys.stderr, "WARNING: whisper module could not be loaded, whisper support disabled"
+    print("WARNING: whisper module could not be loaded, whisper support disabled", file=sys.stderr)
+  try:
+    import ceres  # noqa
+    if os.path.exists(CERES_DIR):
+      STANDARD_DIRS.append(CERES_DIR)
+  except ImportError:
+    pass
   try:
     import rrdtool  # noqa
     if os.path.exists(RRD_DIR):
@@ -223,14 +308,27 @@ if MEMCACHE_HOSTS:
         'LOCATION': MEMCACHE_HOSTS,
         'TIMEOUT': DEFAULT_CACHE_DURATION,
         'KEY_PREFIX': MEMCACHE_KEY_PREFIX,
+        'OPTIONS': MEMCACHE_OPTIONS,
     }
+
+if not CACHES:
+  CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.dummy.DummyCache',
+    },
+  }
 
 # Authentication shortcuts
 if USE_LDAP_AUTH and LDAP_URI is None:
   LDAP_URI = "ldap://%s:%d/" % (LDAP_SERVER, LDAP_PORT)
 
 if USE_REMOTE_USER_AUTHENTICATION or REMOTE_USER_BACKEND:
-  MIDDLEWARE_CLASSES += ('django.contrib.auth.middleware.RemoteUserMiddleware',)
+  if REMOTE_USER_MIDDLEWARE:
+    MIDDLEWARE += (REMOTE_USER_MIDDLEWARE,)
+  else:
+    MIDDLEWARE += ('django.contrib.auth.middleware.RemoteUserMiddleware',)
+  if DJANGO_VERSION < (1, 10):
+      MIDDLEWARE_CLASSES = MIDDLEWARE
   if REMOTE_USER_BACKEND:
     AUTHENTICATION_BACKENDS.insert(0,REMOTE_USER_BACKEND)
   else:

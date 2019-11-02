@@ -1,10 +1,9 @@
-import json
 import re
 import errno
 
 from os.path import getmtime
-from urllib import urlencode
-from ConfigParser import ConfigParser
+from six.moves.urllib.parse import urlencode
+from six.moves.configparser import ConfigParser
 from django.shortcuts import render_to_response
 from django.http import QueryDict
 from django.conf import settings
@@ -13,9 +12,10 @@ from django.contrib.staticfiles import finders
 from django.utils.safestring import mark_safe
 from graphite.compat import HttpResponse
 from graphite.dashboard.models import Dashboard, Template
+from graphite.dashboard.send_graph import send_graph_email
 from graphite.render.views import renderView
-from send_graph import send_graph_email
-
+from graphite.util import json
+from graphite.user_util import isAuthenticated
 
 fieldRegex = re.compile(r'<([^>]+)>')
 defaultScheme = {
@@ -42,6 +42,7 @@ defaultKeyboardShortcuts = {
 }
 
 ALL_PERMISSIONS = ['change', 'delete']
+
 
 class DashboardConfig:
   def __init__(self):
@@ -159,7 +160,7 @@ def template(request, name, val):
 
   try:
     config.check()
-  except OSError, e:
+  except OSError as e:
     if e.errno == errno.ENOENT:
       template_conf_missing = True
     else:
@@ -201,9 +202,10 @@ def template(request, name, val):
     context['initialState'] = json.dumps(state)
   return render_to_response("dashboard.html", context)
 
+
 def getPermissions(user):
   """Return [change, delete] based on authorisation model and user privileges/groups"""
-  if user and not user.is_authenticated():
+  if user and not isAuthenticated(user):
     user = None
   if not settings.DASHBOARD_REQUIRE_AUTHENTICATION:
     return ALL_PERMISSIONS      # don't require login
@@ -310,8 +312,9 @@ def find(request):
   results = []
 
   # Find all dashboard names that contain each of our query terms as a substring
-  for dashboard in Dashboard.objects.order_by('name'):
-    name = dashboard.name.lower()
+  for dashboard_name in Dashboard.objects.order_by('name').values_list('name', flat=True):
+    name = dashboard_name.lower()
+
     if name.startswith('temporary-'):
       continue
 
@@ -324,7 +327,7 @@ def find(request):
         break
 
     if found:
-      results.append( dict(name=dashboard.name) )
+      results.append( dict(name=dashboard_name) )
 
   return json_response( dict(dashboards=results) )
 

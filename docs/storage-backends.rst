@@ -26,6 +26,7 @@ of paths to finder implementations. Its default value is:
 .. code-block:: python
 
     STORAGE_FINDERS = (
+        'graphite.finders.remote.RemoteFinder',
         'graphite.finders.standard.StandardFinder',
     )
 
@@ -45,9 +46,12 @@ Whisper database and a Ceres database:
 .. code-block:: python
 
     STORAGE_FINDERS = (
+        'graphite.finders.remote.RemoteFinder',
         'graphite.finders.standard.StandardFinder',
         'graphite.finders.ceres.CeresFinder',
     )
+
+.. _custom-finders:
 
 Custom finders
 ^^^^^^^^^^^^^^
@@ -69,8 +73,9 @@ query:
 .. code-block:: python
 
     from graphite.node import LeafNode, BranchNode
+    from graphite.finders.utils import BaseFinder
 
-    class CustomFinder(object):
+    class CustomFinder(BaseFinder):
         def find_nodes(self, query):
             # find some paths matching the query, then yield them
             for path in matches:
@@ -87,8 +92,9 @@ methods: ``fetch()`` and ``get_intervals()``:
 .. code-block:: python
 
     from graphite.intervals import IntervalSet, Interval
+    from graphite.readers.utils import BaseReader
 
-    class CustomReader(object):
+    class CustomReader(BaseReader):
         __slots__ = ('path',)  # __slots__ is recommended to save memory on readers
 
         def __init__(self, path):
@@ -115,6 +121,59 @@ the database has gaps: gaps can be filled with ``None`` values.
 available for this given metric in the database. It must return an
 ``IntervalSet`` of one or more ``Interval`` objects.
 
+.. _advanced-finders:
+
+Advanced finders
+^^^^^^^^^^^^^^^^
+
+Custom finders may also implement the following methods:
+
+``factory(cls)``
+  This class method is responsible for initializing and returning the finder object(s) as a list.
+
+  It may return a list of 1 or more instances of the finder, if multiple instances are returned they will be called concurrently in multiple threads.  This is used by ``RemoteFinder`` to dispatch requests to multiple remote hosts in parallel.
+
+  If not defined, a single instance of the finder will be initialized with no parameters.
+
+``get_index(self, requestContext)``
+  This method should return all node paths that the finder is aware of as a list of strings.
+
+  ``requestContext`` is a dict which may contain ``localOnly`` and ``forwardHeaders`` keys.
+
+  If not implemented, ``find_nodes()`` will be called with a query for ``**`` and a list of the returned nodes' paths will be returned.
+
+``find_multi(self, queries)``
+  This method follows the same semantics as ``find_node()`` but accepts a list of queries.
+
+  If not implemented, ``find_nodes()`` will be called for each query specified.
+
+``fetch(self, patterns, start_time, end_time, now=None, requestContext=None)``
+  This method is responsible for loading data for render requests.
+
+  It should return a list of result dicts, each of which contains:
+
+  .. code-block:: python
+
+      {
+        'pathExpression': '<the pattern that this path matched>',
+        'path': 'the.metric.path',
+        'name': 'the.metric.path',
+        'time_info': (_from_, _to_, _step_),
+        'values': [list of values],
+      }
+
+  If not implemented, ``find_multi()`` will be called with a list of queries and ``node.fetch()`` will be called on every result.
+
+``auto_complete_tags(self, exprs, tagPrefix=None, limit=None, requestContext=None)``
+  This method is only used when ``tags = True`` is specified in the class definition.
+
+  If defined it should return an auto-complete list of tags for series that match the specified expressions.
+
+``auto_complete_values(self, exprs, tag, valuePrefix=None, limit=None, requestContext=None)``
+  This method is only used when ``tags = True`` is specified in the class definition.
+
+  If defined it should return an auto-complete list of values for the specified tag on series that match the specified expressions.
+
 Installing custom finders
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -123,4 +182,5 @@ a namespace of your choice. Python packaging won't be covered here but you can
 look at third-party finders to get some inspiration:
 
 * `Cyanite finder <https://github.com/brutasse/graphite-cyanite>`_
+* `BigGraphite finder <https://github.com/criteo/biggraphite/blob/master/biggraphite/plugins/graphite.py>`_
 * KairosDB finder
