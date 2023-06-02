@@ -20,7 +20,7 @@ URL_PREFIX
 SECRET_KEY
   `Default: UNSAFE_DEFAULT`
 
-  This key is used for salting of hashes used in auth tokens, CRSF middleware, cookie storage, etc. This should be set identically among all nodes if used behind a load balancer.
+  This key is used for salting of hashes used in auth tokens, CSRF middleware, cookie storage, etc. This should be set identically among all nodes if used behind a load balancer.
 
 ALLOWED_HOSTS
   `Default: *`
@@ -52,6 +52,12 @@ LOG_CACHE_PERFORMANCE
   `Default: False`
 
   Triggers the creation of ``cache.log`` which logs timings for remote calls to `carbon-cache` as well as Request Cache (memcached) hits and misses.
+
+LOG_INFO_PERFORMANCE
+  `Default: True`
+
+  Triggers the creation of ``info.log`` which logs general logs. Enabled by default.
+
 
 DEBUG = True
   `Default: False`

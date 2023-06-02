@@ -163,6 +163,10 @@ function htmlEncode(input) {
   });
 }
 
+function htmlStriped(input) {
+  return htmlEncode(input).replace(/\s/g, '_')
+}
+
 function initDashboard () {
 
   // Populate naming-scheme based datastructures
@@ -374,8 +378,7 @@ function initDashboard () {
       enableKeyEvents: true,
       cls: 'completer-input-field',
       listeners: {
-        keypress: completerKeyPress,
-        specialkey: completerKeyPress,
+        keydown: completerKeyPress,
         afterrender: focusCompleter
       }
     });
@@ -1230,7 +1233,7 @@ function selectRelativeTime() {
     fieldLabel: 'Show the past',
     width: 90,
     allowBlank: false,
-    regex: /\d+/,
+    regex: /^\d+$/,
     regexText: 'Please enter a number',
     value: TimeRange.relativeStartQuantity
   });
@@ -1252,7 +1255,7 @@ function selectRelativeTime() {
     fieldLabel: 'Until',
     width: 90,
     allowBlank: true,
-    regex: /\d+/,
+    regex: /^\d+$/,
     regexText: 'Please enter a number',
     value: TimeRange.relativeUntilQuantity
   });
@@ -1292,10 +1295,10 @@ function selectRelativeTime() {
 
   function updateTimeRange() {
     TimeRange.type = 'relative';
-    TimeRange.relativeStartQuantity = quantityField.getValue();
-    TimeRange.relativeStartUnits = unitField.getValue();
-    TimeRange.relativeUntilQuantity = untilQuantityField.getValue();
-    TimeRange.relativeUntilUnits = untilUnitField.getValue();
+    TimeRange.relativeStartQuantity = htmlStriped(quantityField.getValue());
+    TimeRange.relativeStartUnits = htmlStriped(unitField.getValue());
+    TimeRange.relativeUntilQuantity = htmlStriped(untilQuantityField.getValue());
+    TimeRange.relativeUntilUnits = htmlStriped(untilUnitField.getValue());
     win.close();
     timeRangeUpdated();
   }
@@ -1915,6 +1918,7 @@ function graphClicked(graphView, graphIndex, element, evt) {
           header: 'Target',
           dataIndex: 'target',
           width: gridWidth - 90,
+          renderer: 'htmlEncode',
           editor: {xtype: 'textfield'}
         },
         {
@@ -3015,8 +3019,8 @@ function setDashboardName(name) {
 
     document.title = name + ' - Graphite Dashboard';
     changeHash(name);
-    navBar.setTitle(name + ' - (' + dashboardURL + ')');
-    saveButton.setText('Save "' + name + '"');
+    navBar.setTitle(htmlEncode(name + ' - (' + dashboardURL + ')'));
+    saveButton.setText(htmlEncode('Save "' + name + '"'));
     saveButton.enable();
   }
 }
@@ -3153,7 +3157,7 @@ function showDashboardFinder() {
 
   dashboardsList = new Ext.list.ListView({
     columns: [
-      {header: 'Dashboard', width: 1.0, dataIndex: 'name', sortable: false}
+      {header: 'Dashboard', width: 1.0, dataIndex: 'name', sortable: false, tpl:'{name:htmlEncode}'}
     ],
     columnSort: false,
     emptyText: 'No dashboards found',

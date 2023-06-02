@@ -4,7 +4,7 @@ import errno
 from os.path import getmtime
 from six.moves.urllib.parse import urlencode
 from six.moves.configparser import ConfigParser
-from django.shortcuts import render_to_response
+from django.shortcuts import render
 from django.http import QueryDict
 from django.conf import settings
 from django.contrib.auth import login, authenticate, logout
@@ -16,6 +16,7 @@ from graphite.dashboard.send_graph import send_graph_email
 from graphite.render.views import renderView
 from graphite.util import json
 from graphite.user_util import isAuthenticated
+from graphite.errors import handleInputParameterError, str_param
 
 fieldRegex = re.compile(r'<([^>]+)>')
 defaultScheme = {
@@ -108,7 +109,9 @@ class DashboardConfig:
 config = DashboardConfig()
 
 
+@handleInputParameterError
 def dashboard(request, name=None):
+  name = str_param('name', name)
   dashboard_conf_missing = False
 
   try:
@@ -152,10 +155,12 @@ def dashboard(request, name=None):
     else:
       context['initialState'] = dashboard.state
 
-  return render_to_response("dashboard.html", context)
+  return render(request, "dashboard.html", context)
 
 
+@handleInputParameterError
 def template(request, name, val):
+  name = str_param('name', name)
   template_conf_missing = False
 
   try:
@@ -200,7 +205,7 @@ def template(request, name, val):
     state = json.loads(template.loadState(val))
     state['name'] = '%s/%s' % (name, val)
     context['initialState'] = json.dumps(state)
-  return render_to_response("dashboard.html", context)
+  return render(request, "dashboard.html", context)
 
 
 def getPermissions(user):
@@ -221,7 +226,10 @@ def getPermissions(user):
   return permissions
 
 
+@handleInputParameterError
 def save(request, name):
+  name = str_param('name', name)
+
   if 'change' not in getPermissions(request.user):
     return json_response( dict(error="Must be logged in with appropriate permissions to save") )
   # Deserialize and reserialize as a validation step
@@ -233,12 +241,16 @@ def save(request, name):
     dashboard = Dashboard.objects.create(name=name, state=state)
   else:
     dashboard.state = state
-    dashboard.save();
+    dashboard.save()
 
   return json_response( dict(success=True) )
 
 
+@handleInputParameterError
 def save_template(request, name, key):
+  name = str_param('name', name)
+  key = str_param('key', key)
+
   if 'change' not in getPermissions(request.user):
     return json_response( dict(error="Must be logged in with appropriate permissions to save the template") )
   # Deserialize and reserialize as a validation step
@@ -252,12 +264,14 @@ def save_template(request, name, key):
     template.save()
   else:
     template.setState(state, key)
-    template.save();
+    template.save()
 
   return json_response( dict(success=True) )
 
 
+@handleInputParameterError
 def load(request, name):
+  name = str_param('name', name)
   try:
     dashboard = Dashboard.objects.get(name=name)
   except Dashboard.DoesNotExist:
@@ -266,7 +280,9 @@ def load(request, name):
   return json_response( dict(state=json.loads(dashboard.state)) )
 
 
+@handleInputParameterError
 def load_template(request, name, val):
+  name = str_param('name', name)
   try:
     template = Template.objects.get(name=name)
   except Template.DoesNotExist:
@@ -277,7 +293,9 @@ def load_template(request, name, val):
   return json_response( dict(state=state) )
 
 
+@handleInputParameterError
 def delete(request, name):
+  name = str_param('name', name)
   if 'delete' not in getPermissions(request.user):
     return json_response( dict(error="Must be logged in with appropriate permissions to delete") )
 
@@ -290,7 +308,9 @@ def delete(request, name):
     return json_response( dict(success=True) )
 
 
+@handleInputParameterError
 def delete_template(request, name):
+  name = str_param('name', name)
   if 'delete' not in getPermissions(request.user):
     return json_response( dict(error="Must be logged in with appropriate permissions to delete the template") )
 
@@ -360,7 +380,7 @@ def find_template(request):
 
 def help(request):
   context = {}
-  return render_to_response("dashboardHelp.html", context)
+  return render(request, "dashboardHelp.html", context)
 
 
 def email(request):

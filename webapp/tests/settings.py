@@ -43,6 +43,9 @@ elif os.environ.get('TEST_POSTGRESQL'):
         },
     }
 
+TAGDB_REDIS_HOST = os.environ.get('TEST_REDIS_HOST') or 'localhost'
+TAGDB_REDIS_PORT = os.environ.get('TEST_REDIS_PORT') or 6379
+
 if VERSION < (1, 6):
     TEST_RUNNER = 'discover_runner.DiscoverRunner'
 
@@ -52,7 +55,7 @@ CACHES = {
     },
 }
 
-# Temporaray directories
+# Temporary directories
 
 
 def atexit_tmpremover(dirname):
@@ -76,7 +79,7 @@ WHISPER_DIR = os.path.join(TEMP_GRAPHITE_DIR, 'whisper/')
 os.mkdir(WHISPER_DIR)
 
 # Manually add WHISPER_DIR to STANDARD_DIRS
-# STANDARD_DIRS is generated programtically in settings.py, the modification of
+# STANDARD_DIRS is generated programmatically in settings.py, the modification of
 # WHISPER_DIR above does not change the value in STANDARD_DIRS.
 STANDARD_DIRS = [WHISPER_DIR]
 

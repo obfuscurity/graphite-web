@@ -20,6 +20,8 @@ try:
 except ImportError:
     from django.contrib.auth.models import User
 
+from graphite.util import htmlEscape
+
 
 class DashboardTest(TestCase):
     # Set config to the test config file
@@ -45,14 +47,14 @@ class DashboardTest(TestCase):
         check.side_effect = OSError(errno.EPERM, 'Operation not permitted')
         url = reverse('dashboard')
         with self.assertRaises(Exception):
-            response = self.client.get(url)
+            _ = self.client.get(url)
 
     @mock.patch('graphite.dashboard.views.DashboardConfig.check')
     def test_dashboard_template_conf_read_failure(self, check):
         check.side_effect = OSError(errno.EPERM, 'Operation not permitted')
         url = reverse('dashboard_template', args=['bogustemplate', 'testkey'])
         with self.assertRaises(Exception):
-            response = self.client.get(url)
+            _ = self.client.get(url)
 
     @override_settings(DASHBOARD_CONF=os.path.join(TEST_CONF_DIR, 'dashboard.conf.missing_ui'))
     def test_dashboard_conf_missing_ui(self):
@@ -244,23 +246,42 @@ class DashboardTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.content, b'{"templates": []}')
 
+    def test_dashboard_save_temporary_xss_name(self):
+        xssStr = htmlEscape('<img src=1 onerror=alert(1)>')
+        url = '/graphite/dashboard/save_template/' + xssStr + '/testkey'
+
+        request = copy.deepcopy(self.testtemplate)
+        response = self.client.post(url, request)
+        self.assertContains(response, 'name contain restricted symbols', status_code=400)
+
+    def test_dashboard_save_temporary_xss_key(self):
+        xssStr = htmlEscape('<img src=1 onerror=alert(1)>')
+        url = '/graphite/dashboard/save_template/testtemplate/' + xssStr
+
+        request = copy.deepcopy(self.testtemplate)
+        response = self.client.post(url, request)
+        self.assertContains(response, 'key contain restricted symbols', status_code=400)
+
     def test_dashboard_save_template(self):
         url = reverse('dashboard_save_template', args=['testtemplate', 'testkey'])
         request = copy.deepcopy(self.testtemplate)
         response = self.client.post(url, request)
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, b'{"success": true}')
 
-        # Save again after it now exists
+    # Save again after it now exists
     def test_dashboard_save_template_overwrite(self):
         url = reverse('dashboard_save_template', args=['testtemplate', 'testkey'])
         request = copy.deepcopy(self.testtemplate)
         response = self.client.post(url, request)
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, b'{"success": true}')
 
         url = reverse('dashboard_save_template', args=['testtemplate', 'testkey'])
         request = copy.deepcopy(self.testtemplate)
         response = self.client.post(url, request)
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, b'{"success": true}')
 
     def test_dashboard_find_template(self):
         url = reverse('dashboard_save_template', args=['testtemplate', 'testkey'])

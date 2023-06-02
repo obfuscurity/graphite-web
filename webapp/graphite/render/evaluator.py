@@ -27,9 +27,15 @@ def evaluateTarget(requestContext, targets):
     if isinstance(target, six.string_types):
       if not target.strip():
         continue
+
       target = grammar.parseString(target)
 
-    result = evaluateTokens(requestContext, target)
+    try:
+      result = evaluateTokens(requestContext, target)
+    except InputParameterError as e:
+      e.setTargets(requestContext.get('targets', []))
+      e.setSourceIdHeaders(requestContext.get('sourceIdHeaders', {}))
+      raise
 
     # we have to return a list of TimeSeries objects
     if isinstance(result, TimeSeries):
@@ -52,7 +58,7 @@ def evaluateTokens(requestContext, tokens, replacements=None, pipedArg=None):
     return evaluateTokens(requestContext, tokens.template, arglist)
 
   if tokens.expression:
-    if tokens.expression.pipedCalls:
+    if tokens.expression.pipedCalls.asList():
       # when the expression has piped calls, we pop the right-most call and pass the remaining
       # expression into it via pipedArg, to get the same result as a nested call
       rightMost = tokens.expression.pipedCalls.pop()
@@ -88,11 +94,7 @@ def evaluateTokens(requestContext, tokens, replacements=None, pipedArg=None):
     try:
       func = SeriesFunction(tokens.call.funcname)
     except KeyError:
-      msg = 'Received request for unknown function: {func}'.format(func=tokens.call.funcname)
-      log.warning(msg)
-
-      # even if input validation enforcement is disabled, there's nothing else we can do here
-      raise InputParameterError(msg)
+      raise InputParameterError('Received request for unknown function: {func}'.format(func=tokens.call.funcname))
 
     rawArgs = tokens.call.args or []
     if pipedArg is not None:
@@ -102,39 +104,27 @@ def evaluateTokens(requestContext, tokens, replacements=None, pipedArg=None):
     kwargs = dict([(kwarg.argname, evaluateTokens(requestContext, kwarg.args[0], replacements))
                    for kwarg in tokens.call.kwargs])
 
-    def handleInvalidParameters(e):
-      if not getattr(handleInvalidParameters, 'alreadyLogged', False):
-        log.warning(
-          'Received invalid parameters ({msg}): {func} ({args})'.format(
-            msg=str(e.message),
-            func=tokens.call.funcname,
-            args=', '.join(
-              argList
-              for argList in [
-                ', '.join(str(arg) for arg in args),
-                ', '.join('{k}={v}'.format(k=str(k), v=str(v)) for k, v in kwargs.items()),
-              ] if argList
-            )
-          ))
-
-        # only log invalid parameters once
-        setattr(handleInvalidParameters, 'alreadyLogged', True)
-
-      if settings.ENFORCE_INPUT_VALIDATION:
-        raise
-
     if hasattr(func, 'params'):
       try:
-        validateParams(tokens.call.funcname, func.params, args, kwargs)
+        (args, kwargs) = validateParams(tokens.call.funcname, func.params, args, kwargs)
       except InputParameterError as e:
-        handleInvalidParameters(e)
+        e.setSourceIdHeaders(requestContext.get('sourceIdHeaders', {}))
+        e.setTargets(requestContext.get('targets', []))
+        e.setFunction(tokens.call.funcname, args, kwargs)
+        if settings.ENFORCE_INPUT_VALIDATION:
+          raise
+        else:
+          log.warning('Validation Error: %s', str(e))
 
     try:
       return func(requestContext, *args, **kwargs)
     except NormalizeEmptyResultError:
       return []
     except InputParameterError as e:
-      handleInvalidParameters(e)
+        e.setSourceIdHeaders(requestContext.get('sourceIdHeaders', {}))
+        e.setTargets(requestContext.get('targets', []))
+        e.setFunction(tokens.call.funcname, args, kwargs)
+        raise
 
   return evaluateScalarTokens(tokens)
 
@@ -158,6 +148,9 @@ def evaluateScalarTokens(tokens):
 
   if tokens.none:
     return None
+
+  if tokens.infinity:
+    return float('inf')
 
   raise InputParameterError("unknown token in target evaluator")
 

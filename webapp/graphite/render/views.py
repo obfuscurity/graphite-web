@@ -22,7 +22,7 @@ from random import shuffle
 from six.moves.urllib.parse import urlencode, urlsplit, urlunsplit, parse_qs
 
 from graphite.compat import HttpResponse
-from graphite.errors import InputParameterError
+from graphite.errors import InputParameterError, handleInputParameterError
 from graphite.user_util import getProfileByUsername
 from graphite.util import json, unpickle, pickle, msgpack, BytesIO
 from graphite.storage import extractForwardHeaders
@@ -34,7 +34,7 @@ from graphite.render.hashing import hashRequest, hashData
 from graphite.render.glyph import GraphTypes
 from graphite.tags.models import Series, Tag, TagValue, SeriesTag  # noqa # pylint: disable=unused-import
 
-from django.http import HttpResponseServerError, HttpResponseRedirect, HttpResponseBadRequest
+from django.http import HttpResponseServerError, HttpResponseRedirect
 from django.template import Context, loader
 from django.core.cache import cache
 from django.core.exceptions import ObjectDoesNotExist
@@ -46,20 +46,17 @@ from six.moves import zip
 loadFunctions()
 
 
-def handleInputParameterError(f):
-    def new_f(*args, **kwargs):
-      try:
-        return f(*args, **kwargs)
-      except InputParameterError as e:
-        return HttpResponseBadRequest('Bad Request: {err}'.format(err=e))
-
-    return new_f
-
-
 @handleInputParameterError
 def renderView(request):
   start = time()
-  (graphOptions, requestOptions) = parseOptions(request)
+
+  try:
+    # we consider exceptions thrown by the option
+    # parsing to be due to user input error
+    (graphOptions, requestOptions) = parseOptions(request)
+  except Exception as e:
+    raise InputParameterError(str(e))
+
   useCache = 'noCache' not in requestOptions
   cacheTimeout = requestOptions['cacheTimeout']
   # TODO: Make that a namedtuple or a class.
@@ -71,10 +68,13 @@ def renderView(request):
     'template' : requestOptions['template'],
     'tzinfo' : requestOptions['tzinfo'],
     'forwardHeaders': requestOptions['forwardHeaders'],
+    'sourceIdHeaders': requestOptions['sourceIdHeaders'],
     'data' : [],
     'prefetched' : {},
     'xFilesFactor' : requestOptions['xFilesFactor'],
     'maxDataPoints' : requestOptions.get('maxDataPoints', None),
+    'targets': requestOptions['targets'],
+    'maxStep': requestOptions.get('maxStep', None),
   }
   data = requestContext['data']
 
@@ -239,9 +239,10 @@ def renderViewJson(requestOptions, data):
         if not datapoints:
           continue
 
-      series_data.append(dict(target=series.name, tags=series.tags, datapoints=datapoints))
+      series_data.append(dict(target=series.name, tags=dict(series.tags), datapoints=datapoints))
 
-  output = json.dumps(series_data, indent=(2 if requestOptions.get('pretty') else None)).replace('None,', 'null,').replace('NaN,', 'null,').replace('Infinity,', '1e9999,')
+  output = json.dumps(series_data, indent=(2 if requestOptions.get('pretty') else None)) \
+      .replace('NaN,', 'null,').replace('Infinity,', '1e9999,')
 
   if 'jsonp' in requestOptions:
     response = HttpResponse(
@@ -355,6 +356,7 @@ def parseOptions(request):
   cacheTimeout = int( queryParams.get('cacheTimeout', settings.DEFAULT_CACHE_DURATION) )
   requestOptions['targets'] = []
   requestOptions['forwardHeaders'] = extractForwardHeaders(request)
+  requestOptions['sourceIdHeaders'] = extractSourceIdHeaders(request)
 
   # Extract the targets out of the queryParams
   mytargets = []
@@ -393,6 +395,8 @@ def parseOptions(request):
     requestOptions['maxDataPoints'] = int(queryParams['maxDataPoints'])
   if 'noNullPoints' in queryParams:
     requestOptions['noNullPoints'] = True
+  if 'maxStep' in queryParams and queryParams['maxStep'].isdigit():
+    requestOptions['maxStep'] = int(queryParams['maxStep'])
 
   requestOptions['localOnly'] = queryParams.get('local') == '1'
 
@@ -464,6 +468,26 @@ def parseOptions(request):
   return (graphOptions, requestOptions)
 
 
+# extract headers which get set by Grafana when issuing queries, to help identifying where a query came from.
+# user-defined headers from settings.INPUT_VALIDATION_SOURCE_ID_HEADERS also get extracted and mixed
+# with the standard Grafana headers.
+def extractSourceIdHeaders(request):
+    source_headers = {
+        'X-Grafana-Org-ID': 'grafana-org-id',
+        'X-Dashboard-ID': 'dashboard-id',
+        'X-Panel-ID': 'panel-id',
+    }
+    source_headers.update(settings.INPUT_VALIDATION_SOURCE_ID_HEADERS)
+
+    headers = {}
+    for hdr_name, log_name in source_headers.items():
+        value = request.META.get('HTTP_' + hdr_name.upper().replace('-', '_'))
+        if value:
+            headers[log_name] = value
+
+    return headers
+
+
 connectionPools = {}
 
 
@@ -475,7 +499,7 @@ def delegateRendering(graphType, graphOptions, headers=None):
   if headers is None:
     headers = {}
   start = time()
-  postData = graphType + '\n' + pickle.dumps(graphOptions)
+  postData = (graphType + '\n').encode() + pickle.dumps(graphOptions)
   servers = settings.RENDERING_HOSTS[:] #make a copy so we can shuffle it safely
   shuffle(servers)
   connector_class = connector_class_selector(settings.INTRACLUSTER_HTTPS)
@@ -524,7 +548,7 @@ def renderLocalView(request):
   try:
     start = time()
     reqParams = BytesIO(request.body)
-    graphType = reqParams.readline().strip()
+    graphType = reqParams.readline().strip().decode()
     optionsPickle = reqParams.read()
     reqParams.close()
     graphClass = GraphTypes[graphType]

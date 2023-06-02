@@ -9,7 +9,7 @@
 #
 # Set this to a long, random unique string to use as a secret key for this
 # install. This key is used for salting of hashes used in auth tokens,
-# CRSF middleware, cookie storage, etc. This should be set identically among
+# CSRF middleware, cookie storage, etc. This should be set identically among
 # instances if used behind a load balancer.
 #SECRET_KEY = 'UNSAFE_DEFAULT'
 
@@ -36,6 +36,7 @@
 #LOG_ROTATION_COUNT = 1
 #LOG_RENDERING_PERFORMANCE = True
 #LOG_CACHE_PERFORMANCE = True
+#LOG_INFO_PERFORMANCE = False
 
 # Filenames for log output, set to '-' to log to stderr
 #LOG_FILE_INFO = 'info.log'
@@ -77,7 +78,7 @@
 # Starting from 1.11, options are used for both python-memcached and pylibmc.
 #MEMCACHE_OPTIONS = { 'socket_timeout': 0.5 }
 
-# this setting controls the default xFilesFactor used for query-time aggregration
+# this setting controls the default xFilesFactor used for query-time aggregation
 DEFAULT_XFILES_FACTOR = 0
 
 # Set URL_PREFIX when deploying graphite-web to a non-root location
@@ -93,6 +94,9 @@ DEFAULT_XFILES_FACTOR = 0
 # Timeouts for find and render requests
 #FIND_TIMEOUT = 3.0  # Timeout for metric find requests
 #FETCH_TIMEOUT = 3.0  # Timeout to fetch series data
+
+# Allow UTF-8 metrics' names (can cause performance issues)
+#UTF8_METRICS = False
 
 #####################################
 # Filesystem Paths #
@@ -334,7 +338,10 @@ DEFAULT_XFILES_FACTOR = 0
 #CARBONLINK_HOSTS = ["127.0.0.1:7002:a", "127.0.0.1:7102:b", "127.0.0.1:7202:c"]
 #CARBONLINK_TIMEOUT = 1.0
 #CARBONLINK_RETRY_DELAY = 15 # Seconds to blacklist a failed remote server
-#
+# Set pickle protocol to use for Carbonlink requests,
+# (default of -1 is HIGHEST_AVAILABLE for your Python version)
+# see more: https://docs.python.org/3/library/pickle.html#data-stream-format
+#CARBONLINK_PICKLE_PROTOCOL = -1
 
 # Type of metric hashing function.
 # The default `carbon_ch` is Graphite's traditional consistent-hashing implementation.
