@@ -1186,7 +1186,7 @@ multiplySeries.aggregator = True
 
 def multiplySeriesLists(requestContext, seriesListFirstPos, seriesListSecondPos):
   """
-  Iterates over a two lists and subtracts series lists 2 through n from series 1
+  Iterates over a two lists and multiplies series lists 2 through n from series 1
   list1[0] to list2[0], list1[1] to list2[1] and so on.
   The lists will need to be the same length
 
